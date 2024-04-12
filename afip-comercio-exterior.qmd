@@ -1,0 +1,106 @@
+---
+title: "Operadores de Comercio Exterior"
+format: html
+---
+
+```{r}
+#| label: setup
+
+# install.packages("librarian")
+librarian::shelf(
+  tidyverse,
+  rvest,
+  RCurl,
+  janitor,
+  glue,
+  here,
+  fs
+)
+```
+
+Este script se dedica a descargar conjuntos de datos de la Administración Federal de Ingresos Públicos (AFIP), específicamente desde la sección de [Operadores de Comercio Exterior](https://www.afip.gob.ar/operadoresComercioExterior/informacionAgregada/informacion-agregada.asp).
+
+Primero, tenemos que determinar el patron de los url's que continen los datos que deseamos. Notamos que todos siguen el mismo formato, con la excepción de la fecha. Es decir, son del formato "https://www.afip.gob.ar/operadoresComercioExterior/informacionAgregada/download.aspx?filename=**{año}{mes}**.zip".
+
+En vez de delinear cada url explicitamente, podemos usar web scraping para encontrar todos los links en la pagina gracias al paquete `rvest`. Despues, podemos filtrar los links que contienen la palabra "download" y extraerlos.
+
+```{r}
+#| label: url-download
+
+home_url <- "https://www.afip.gob.ar/operadoresComercioExterior/informacionAgregada/informacion-agregada.asp"
+
+home_page <- read_html(home_url)
+
+data_urls <-
+  home_page |>
+  html_nodes("a") |>
+  html_attr("href") |>
+  str_subset("download")
+
+data_urls
+```
+
+Ahora que tenemos los links, podemos descargar los archivos zip y extraerlos. Para esto, usamos el paquete `utils`. Dado que cada zip file es medianamente pesado (aprox 140MB) y la conexion a internet puede ser lenta, es posible que la descarga tome un tiempo. Por lo tanto, es recomendable aumentar el tiempo de espera de la conexion.
+
+```{r}
+#| label: download-extract-function
+options(timeout = 1000000)
+
+download_extract <- function(url) {
+  año_mes <- str_extract(url, "\\d{6}")
+  año <- str_sub(año_mes, 1, 4)
+  mes <- str_sub(año_mes, 5, 6)
+
+  output_zip <- here(glue("data/data-raw/{año}-{mes}.zip"))
+  output_dir <- here(glue("data/data-raw/{año}-{mes}"))
+  download.file(url, destfile = output_zip, method = "libcurl")
+  unzip(output_zip, exdir = output_dir)
+
+  # Delete unecessary files and move impo file to parent directory
+  file_delete(here(glue("data/data-raw/{año}-{mes}/expo_agregado_{año_mes}.lst")))
+  file_delete(here(glue("data/data-raw/{año}-{mes}/total_expo_agregado_{año_mes}.lst")))
+
+  file_move(
+    here(glue("data/data-raw/{año}-{mes}/impo_{año_mes}.lst")),
+    here(glue("data/data-raw/impo_{año_mes}.lst"))
+  )
+
+  dir_delete(output_dir)
+}
+
+extract_impo_data <- function(file_path) {
+  año_mes <- str_extract(file_path, "\\d{6}")
+  año <- str_sub(año_mes, 1, 4)
+  mes <- str_sub(año_mes, 5, 6)
+
+  read_delim(file_path, delim = "'") |>
+    clean_names() |>
+    filter(row_number() != 1) |>
+    filter(pos_ncm == "3304.99.90") |>
+    mutate(
+      año = año,
+      mes = mes
+    )
+}
+```
+
+Podemos iterar ambas funciones sobre los links que encontramos anteriormente.
+
+```{r}
+#| label: download-and-unzip
+
+map(data_urls[1:3], download_extract)
+```
+
+```{r}
+#| label: extract-and-export
+
+impo_paths <- fs::dir_ls(here("data/data-raw"), glob = "*.lst")
+
+impo_ts <-
+  map(impo_paths, extract_impo_data) |>
+  list_rbind() |>
+  relocate(año, mes, fecha, .before = everything())
+
+write_csv(impo_ts, here("data/data-final/impo_ts.csv"))
+```
