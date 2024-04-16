@@ -68,19 +68,21 @@ download_extract <- function(url) {
   dir_delete(output_dir)
 }
 
-extract_impo_data <- function(file_path) {
+extract_and_write_impo_data <- function(file_path) {
   año_mes <- str_extract(file_path, "\\d{6}")
   año <- str_sub(año_mes, 1, 4)
   mes <- str_sub(año_mes, 5, 6)
 
+  impo_data <-
   read_delim(file_path, delim = "'") |>
     clean_names() |>
     filter(row_number() != 1) |>
-    filter(pos_ncm == "3304.99.90") |>
-    mutate(
-      año = año,
-      mes = mes
-    )
+    filter(pos_ncm == "3304.99.90") 
+
+    write_csv(impo_data, 
+    here(glue("data/data-intermediate/impo_{año}-{mes}.csv")))
+
+    fs::file_delete(here(glue("data/data-raw/impo_{año_mes}.lst")))
 }
 ```
 
@@ -89,7 +91,7 @@ Podemos iterar ambas funciones sobre los links que encontramos anteriormente.
 ```{r}
 #| label: download-and-unzip
 
-map(data_urls[1:3], download_extract)
+map(data_urls[16:20], download_extract)
 ```
 
 ```{r}
@@ -98,9 +100,14 @@ map(data_urls[1:3], download_extract)
 impo_paths <- fs::dir_ls(here("data/data-raw"), glob = "*.lst")
 
 impo_ts <-
-  map(impo_paths, extract_impo_data) |>
-  list_rbind() |>
-  relocate(año, mes, fecha, .before = everything())
+  map(impo_paths, extract_and_write_impo_data) 
 
-write_csv(impo_ts, here("data/data-final/impo_ts.csv"))
+```
+
+```{r}
+csv_paths <- fs::dir_ls(here("data/data-intermediate"), glob = "*.csv")
+
+map(csv_paths, read_csv) |> 
+  list_rbind() |>
+  write_csv(here("data/data-final/impo_ts.csv"))
 ```
