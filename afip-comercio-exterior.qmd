@@ -90,9 +90,9 @@ Podemos iterar ambas funciones sobre los links que encontramos anteriormente.
 
 ```{r}
 #| label: download-and-unzip
-
-map(data_urls[16:20], download_extract)
-```
+https://www.afip.gob.ar/operadoresComercioExterior/informacionAgregada/download.aspx?filename=201812.zip
+map(data_urls[71:80], download_extract)
+  ```
 
 ```{r}
 #| label: extract-and-export
